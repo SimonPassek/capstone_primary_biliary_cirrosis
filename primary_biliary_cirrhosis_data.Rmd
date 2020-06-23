@@ -1,0 +1,843 @@
+---
+title: "Capstone Report"
+author: "Simon Passek"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    fig_caption: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+subtitle: Primary biliary cirrhosis
+---
+
+# Introduction
+
+Primary biliary cirrhosis(PBC), also known as primary biliary cholangitis is a slowly progressive, autoimmune disease of the intrahepatic bile system, that leads to the gradual destruction of intrahepatic bile ducts.
+
+The typical long term effects are severe and comprise of cirrotic remodeling of the whole liver, liver inflammation, hepatic portal hypertension, liver failure, portocaval anastomoses and resulting ascites.
+
+The typical diagnostic triade are chronic cholestatis (blockage of cholestatic secretion of the bile acid into the small intestine), frequently detectable circulating anti-mitochondrial antibodies (AMAs) (85% of patients) or other anibodies (e.g.antinuclear antibody (ANAs) and characterisitc histology at liver biopsy. It is hypothesized, that PBC often occurs in vulernable individuals, after certain enviromental exposure. The environmental triggers include toxic waste, nail polish, hair dye, various bacteria (e.g., Escherichia coli strains) and cigarette smoking.
+<br/>
+<br/>
+The disease prevalence is 100-fold higher in first degree relatives of a index patient, compared to average popuation risk. This suggests a stron genetic predisposition.
+<br/>
+Typically it manifests in middle-aged women (females to males 9:1) with clinical symptoms like pruritus, blood dyslipidemia, fatigue, poor disgestion with steatorrhea, nutrition deficiency syndrome, xanthomas and osteoporosis.^[Pandit et al., 2020]
+One of the most widly used prognostic and treatment control scores is the Mayo Risk score.^[Purohit et al. 2015]
+<br/>
+Possible treatments include substitution of certain fatty acids, vitamines, and the bile Ursodeoxycholic acid. It works by reducing the concentration of the other relative toxic bile acids.
+The only potentially curing therapy in advanced stages is the liver transplantation, with about 70% 10-year survival after surgery.
+<br/>
+<br/>
+But there are always much less organs available as would be needed for transplantation. Therefore it is desirable to investigate survival outcomes of patients to identify potential prognostic biomarkers. Validated prognostic biomarkers could faciliate liver transplant allocation to those patients, for which the transplant is essenstial for survival. 
+<br/>
+<br/>
+Another implementation of such prognostic markers would be a risk stratification, which can be used for treatment decision in the clinical setting. Paitents at high risk could be more often aided in the hospitals and included in clinical trials with new treatment options.
+
+# Analysis
+
+## Data import
+
+The data for the further analysis was collected as part of a Mayo Clinic trial about PBC between 1974 and 1984. A total of 424 PBC patients met eligibility criteria for the randomized placebo controlled trial of the drug D-penicillamine, referred to Mayo Clinic during that ten-year interval. But only the first 312 cases in the dataset participated in the randomized trial. For those patients the collected data is largly complete. The data is described in (Fleming and Harrington 1991, Chapter 0.2). 
+
+Despite of held study eligibility criteria  additional 112 cases contained did not participate in the clinical trial directly. From those only basic measurements and survival data was recorded. Because of that many datapoints are missing. Six of those 112 cases were lost to follow-up shortly after diagnosis and therefore excluded from the further analysis. So in summary the dataset contains are on an 312 randomized participants and additional recoreded 106 cases. 
+
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+# load/install libraries
+if (!require("tidyverse"))install.packages("tidyverse")
+if(!require("survival"))install.packages("survival")
+if(!require("survminer"))install.packages("survminer")
+if(!require("survMisc"))install.packages("survMisc")
+if(!require("KMsurv"))install.packages("KMsurv")
+if(!require("km.ci"))install.packages("km.ci")
+if(!require("xtable"))install.packages("xtable")
+if(!require("hdnom"))install.packages("hdnom")
+if(!require("shape"))install.packages("shape")
+if(!require("ncvreg"))install.packages("ncvreg")
+if(!require("penalized"))install.packages("penalized")
+if(!require("survAUC"))install.packages("survAUC")
+if(!require("rmarkdown"))install.packages("rmarkdown")
+if(!require("GGally"))install.packages("GGally")
+if(!require("scales"))install.packages("scales")
+if(!require("ggforce"))install.packages("ggforce")
+if(!require("pec"))install.packages("pec")
+if(!require("mice"))install.packages("mice")
+if(!require("Hmisc"))install.packages("Hmisc")
+if(!require("remotes"))install.packages("remotes")
+if(!require("mlr3learners"))install.packages("mlr3learners")
+if(!require("mlr3"))install.packages("mlr3")
+if(!require("mlr3proba"))install.packages("mlr3proba")
+if(!require("mlr3learners.randomforestsrc"))remotes::install_github("mlr3learners/mlr3learners.randomforestsrc")
+if(!require("mlr3viz"))install.packages("mlr3viz")
+if(!require("mlr3measures"))install.packages("mlr3measures")
+if(!require("data.table"))install.packages("data.table")
+if(!require("pracma"))install.packages("pracma")
+if(!require("mlr3learners.penalized"))remotes::install_github("mlr3learners/mlr3learners.penalized")
+if(!require("ranger"))install.packages("ranger")
+if(!require("ggRandomForests"))install.packages("ggRandomForests")
+if(!require("caret"))install.packages("caret")
+
+# set basic plotting style
+theme_set(theme_bw())
+```
+
+
+```{r  message = FALSE, warning = FALSE, echo = FALSE}
+# import data 
+url <- "http://www.mayo.edu/research/documents/pbcdat/DOC-10026921"
+
+pbc_data <- read.delim(url, header = FALSE, sep = "")
+# create column names
+# the colnames are taken from the Appendix D of Fleming and Harrington
+# link https://www.mayo.edu/research/documents/pbchtml/doc-10027635
+
+col_names_pbc_data <- c("id", "time", "status", "trt","age","sex","ascites","hepato", "spiders", 
+"edema", "bili", "chol", "albumin", "copper", "alk.phos", "ast", "trig", "platelet",
+"protime","stage") 
+
+# set colnames
+colnames(pbc_data) <- col_names_pbc_data
+
+# recode levels of factor variables
+pbc_data <- pbc_data %>% mutate(sex = sex, trt = as.numeric(trt), ascites = as.numeric(ascites), hepato = as.numeric(hepato), spiders = as.numeric(spiders), chol = as.numeric(chol), copper = as.numeric(copper), alk.phos = as.numeric(alk.phos), ast = as.numeric(ast), trig = as.numeric(trig), platelet = as.numeric(platelet), protime = as.numeric(protime), stage = as.numeric(stage))
+# age is documented in days --> transform it into years
+pbc_data <- pbc_data %>% mutate(age = round(age/365.25, 0)) 
+# save data
+saveRDS(pbc_data, "pbc_data.rds")
+```
+
+## Exploratory data analysis
+
+
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE, fig.cap="Explanation of variables in the dataset"}
+tribble(~colnames_data,    ~explanation,
+      "id",                "case number",
+      "time",              "number of days between registration and death,",
+         "",                   "transplantion, or end of study (1986)",
+      "satus",             "status: 0=alive, 1=liver transplant, 2=dead",
+      "trt",                "drug: 1 = D_penicillamine vs. 0 = Placebo",
+      "age",                "age in days",
+      "sex",                "sex: 0=male, 1=female",
+    "ascites",              "presence of ascites: 0=no 1=yes",
+    "hepato",               "presence of hepatomegaly 0=no 1=yes",
+    "spiders",              "presence of 'spiders' 0=no 1=yes",
+     "edema",               "presence of edema 0=no,", 
+        "",                 "0.5 = edema present without diuretics,",   
+        "",                "or  edema resolved by diuretics", 
+       "",                  "1 = edema despite diuretic therapy",
+    "bili",                 "serum bilirubin in mg/dl",
+    "chol",                 "serum cholesterol in mg/dl",
+     "albumin",             "albumin in gm/dl",
+      "copper",             "urine copper in ug/day",
+       "alk.phos",          "alkaline phosphatase in U/liter",
+       "ast",               "SGOT in U/ml",
+       "trig",              "triglicerides in mg/dl",
+       "platelet",          "platelets per cubic ml / 1000",
+        "protime",          "prothrombin time in seconds",
+          "stage" ,         "histologic stage of disease stage 1 - 4"
+      )
+```
+
+
+
+In summary the data consists of 17 features(biomarkers) that may be used to predict the outcome of the patient. Status = 0 describes,  that at the last available follow up date (decoded as "time" from study inclusion until last follow up) the patient was alive. So in this situation one does not know wheter the patient of interest suffered the event(in this case death or transplantation) after loss of follow up, or wheter he is a long term surviver. This kind of data is called right cencored data. 
+<br/>
+Status = 1 means that the patient was liver transplanted after "time" in days after study inclusion. Status = 2 decodes for death of the certain patient after "time" following after study inclusion. 
+There are some missing values in the data set, especially for the last 106 patients, that were not included in the study:
+
+
+```{r fig.cap= "Number of NA values in for the 312 study patients", message = FALSE, comment=FALSE,warning=FALSE, echo = FALSE}
+
+#check for NA
+pbc_data %>% mutate(study_participant = c(rep("yes", times = 312), rep("no", times = 106))) %>% gather(key = "features", "values", 2:20) %>% group_by(study_participant)%>% group_by(features) %>%  filter(is.na(values)) %>% ggplot(aes(features, fill = study_participant))+geom_bar()+scale_fill_brewer(palette = "Accent")+geom_text(stat = 'count', aes(label =..count..), vjust= -0.8, cex = 3)+theme(axis.text.x = element_text(angle = 60))
+
+```
+
+Only a few of the patients, that were enrolled in the study, have missing values in the features chol, chopper, platelet and trig.
+Here a 'NA' imputation seems justified and feasible.
+All non_study patients have missing data about treatment and eight other variables. Event status and time until event is avialable, but possilbly important features are missing.
+
+
+```{r fig.cap = "Histogram of continous variables" , warnings = FALSE, message = FALSE, echo = FALSE}
+#set colors of groups manually
+cbp2 <- c("#000000", "#E69F00", "#56B4E9", "#009E73",
+          "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+pbc_data %>% select(sex,time, age,bili,chol, albumin, copper, alk.phos, ast, trig, platelet, protime)%>% pivot_longer(names_to = "features", values_to = "values", 2:ncol(.))%>% mutate(sex = as.factor(sex)) %>%  ggplot(aes(values, fill = sex))+scale_fill_brewer(palette = "Dark2")+geom_histogram(col = "black")+geom_freqpoly(col = "red", alpha = 0.4)+theme(axis.text.x = element_text(angle = 60))+facet_wrap(~features, scales = "free")
+
+```
+
+<br/>
+<br/>
+<br/>
+
+Especially the frequency distributions of the enzymes alc.phos and asat, but also the blood coagulation parameter protime, the fatty blood acids parameters trig and chol and the blood cell degradation product bili are skewed. This can have many possible reasons. Some of the highest or lowest values may be due to measurement error or they represent blood variables with a non normal distibution in the underlying population, as it is often the case in biological variables.
+
+```{r fig.cap= "Boxplot of continous variables", message = FALSE, warning = FALSE, echo = FALSE}
+
+pbc_data %>% select(sex,time, age,bili,chol, albumin, copper, alk.phos, ast, trig, platelet, protime)%>% pivot_longer(names_to = "features", values_to = "values", 2:ncol(.)) %>% mutate(sex = as.factor(sex)) %>%  ggplot(aes(features,values, group = sex, fill = sex, col = sex))+geom_boxplot(col = "black")+geom_point(alpha = 0.1, position = position_jitterdodge())+scale_fill_brewer(palette = "Dark2")+scale_color_brewer(palette = "Dark2")+facet_wrap(~features, scales = "free", nrow = 3)
+
+```
+
+Nevertheless transformation of those features may result in lower error rate in predictions of events later on. Especially because later used learner and prediction algrithm like the Cox Proportional Hazard model can be negavely affected by outliers. 
+
+```{r fig.cap= "Boxplot of log2() transformed continous variables", message = FALSE, warning = FALSE, echo = FALSE}
+
+pbc_data %>% mutate(alk.phos = log2(alk.phos), ast = log2(ast), copper = log2(copper), trig = log2(trig), protime = log2(protime), bili = log2(bili), chol = log2(chol)) %>% select(sex, time, age,bili,chol, albumin, copper, alk.phos, ast, trig, platelet, protime)%>% pivot_longer(names_to = "features", values_to = "values", 2:ncol(.))%>% mutate(sex = as.factor(sex)) %>%  ggplot(aes( values, fill = sex))+geom_histogram(color = "black")+scale_fill_brewer(palette = "Dark2")+theme(axis.text.x = element_text(angle = 60))+facet_wrap(~features, scales = "free", nrow = 2)
+
+```
+
+After log2 transformation the data seems more normally distributed and outliers are partly "smoothed".
+
+```{r fig.cap= "Quantile-quantile plot of log2() transformed features", message = FALSE, warning = FALSE, echo = FALSE}
+
+#log2() transform the data
+pbc_data_transformed <- pbc_data %>% mutate(alk.phos = log2(alk.phos), ast = log2(ast), copper = log2(copper), trig = log2(trig), protime = log2(protime), bili = log2(bili), chol = log2(chol))
+
+pbc_data %>% mutate(alk.phos = log2(alk.phos), ast = log2(ast), copper = log2(copper), trig = log2(trig), protime = log2(protime), bili = log2(bili), chol = log2(chol)) %>% select(sex, time, age,bili,chol, albumin, copper, alk.phos, ast, trig, platelet, protime)%>% pivot_longer(names_to = "features", values_to = "values", 2:ncol(.))%>% mutate(sex = as.factor(sex)) %>%  ggplot(aes(sample = values, col = sex))+scale_color_brewer(palette = "Dark2")+stat_qq()+stat_qq_line()+facet_wrap(~features, scales = "free", nrow = 2)
+
+```
+
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+
+
+```{r, fig.cap = "Barplot of categorical features", message = FALSE, warning = FALSE, echo = FALSE}
+
+pbc_data %>% select(sex,status, ascites, hepato, spiders, edema, stage) %>% pivot_longer(names_to = "features", values_to = "values", 2:ncol(.))%>% mutate(sex = as.factor(sex)) %>% ggplot(aes(values,  fill = sex))+geom_bar()+scale_x_continuous(breaks = function(x) unique(floor(pretty(seq(0, (max(x) + 1) * 1.1)))))+scale_fill_brewer(palette = "Dark2") + geom_text(stat = 'count', aes(label =..count..), vjust= -0.8, cex = 3)+facet_wrap(~features, scale = "free", nrow = 2)
+
+```
+
+The patients in the study are classified into four histologically defined disease stages: the further the PBC has advanced, histological stages tend to increase.
+Most of the patients had no event (status = 0) in the available follow-up period. Few of the patients have gone through liver transplantation (status = 1). 
+Next we will explore correlation between the quantitative variables:
+
+```{r, fig.cap= "Spearman correlation between features", message = FALSE, warning = FALSE, echo = FALSE}
+
+pbc_data_transformed %>% select(time, age,bili,chol, albumin, copper, alk.phos, ast, trig, platelet, protime,sex,status, ascites, hepato, spiders, edema, stage) %>% ggcorr(label = TRUE, label_size = 2.8, method = c("pairwise", "spearman"))
+
+```
+
+There seems a positive correlation between bili and copper, ast and bili. Other stronger correlations can not be observed.
+
+
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+
+
+## Analysis and results
+
+The 17 possibly predictive features available were recorded at time of study inclusion. The goal of the following analysis is to identify potential biomarkers that allow risk stratification of patients into high and low risk groups. Identification of such markers may not only help to understand disease process and progression but may also allow more individual treatment decisions.
+A patient with a validated high risk score could be treated more intense. In the case of PBC this could mean inclusion in clinical drug trials or earlier scheduling of liver transplantation.
+
+This kind of analysis is also termed survival analysis or time-to-event analysis. 
+Survival analysis examines data on whether a specific event of interest takes place and how long it takes, until this event occurs. In this setting on can not use ordinary regression analysis. 
+Firstly, survival data contains only positive values and therefore needs to be transformed to avoid biases. Secondly, ordinary regression analysis cannot deal with censored observations.
+
+Censored observations are observations in which the event of interest has not occurred, yet. Survival analysis has to handle such censored, also termed right cencored data: 
+Survival data is usually written as a pair $(t_i,\delta_i)$, where $t$ represents the time until time of event or last
+follow-up, and $\delta$ is a 0/1 variable with 0= subject was censored at
+$t$ and 1 = subject had an event at $t$. This is the most simplest setting in time-to-event analysis, because only one kind of event may or may not occur. 
+In our case a patient with PBC is in a situation with competing risks: 
+
+1. He could get a liver transplant(status = 1). 
+
+2. He could move to another city or die in a car accident(loss of follow up, status = 0). 
+
+3. He could die before receiving a liver transplant(status = 2).
+
+In order to simplify the following analysis, and because only 19 of the 312 randomized trial patients were actually liver transplanted, we will combine patients' status = 1 and = 0 to the status variable = 0, therefore defining them as alive at censoring time. 
+
+### Missing value imputation and data split
+
+For the further analysis we will first extract the 312 study participants, because there just a few variables a missing.
+Then by using the aregImpute function from the Hmisc package^[Multiple Imputation using Additive Regression, Bootstrapping, and Predictive Mean Matching, https://cran.r-project.org/web/packages/Hmisc/index.html] is applied to impute the missing values.
+Another possible imputation for the missing values would be  k-nearest neighbour algorithm (knn). Because of small sample sizes imputation is done on the whole dataset itself, and not on the training and testing set individually.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# change status 0 and 1 into 1
+pbc_data_transformed <- pbc_data_transformed %>% mutate(
+  status = case_when(
+  status == 0 ~ 0,
+  status ==1 ~ 1,
+  status == 2 ~1
+))
+
+pbc_data_transformed_study_patients <- pbc_data_transformed %>%slice(seq(1, 312, 1))
+
+# aregImpute() to umpute missing values-------------------------------
+smarti <- aregImpute(~ as.factor(ascites) +
+                       as.factor(hepato)+as.factor(spiders)+
+                       as.factor(edema)+bili+chol+
+                       albumin+copper+alk.phos+ast+
+                       trig+platelet+protime+as.factor(stage), 
+                     n.impute = 10, match = "kclosest", 
+                     data = pbc_data_transformed_study_patients)
+
+imputed <- impute.transcan(smarti, imputation = 1, 
+                           data = pbc_data_transformed_study_patients, 
+                           list.out = TRUE, pr = FALSE, check = FALSE)
+pbc_data_transformed_study_patients_imputed_areg <- 
+  pbc_data_transformed_study_patients
+pbc_data_transformed_study_patients_imputed_areg [names(imputed)]<- imputed
+
+
+#  k-nearest neighbour algorithm (knn) to impute missing values-----------------------------------
+# using this approach with automatically center and scale the data
+# because of this all categorical values have to be transforemd into factors
+
+pbc_data_transformed_study_patients_for_knn <- 
+  pbc_data_transformed_study_patients %>% 
+  mutate(sex = as.factor(sex),
+                                                                                              
+         trt = as.factor(trt),
+                                                                                              
+         ascites = as.factor(ascites),
+                                                                                              
+         hepato = as.factor(hepato),
+                                                                                              
+         spiders = as.factor(spiders),
+                                                                                              
+         edema = as.factor(edema),
+                                                                                              
+         stage = as.factor(stage)
+)
+
+preProcessed_knn <- caret::preProcess(
+  pbc_data_transformed_study_patients_for_knn[,-c(1,2,3,5)], method = "knnImpute")
+
+#with predict() the missing values imputation is calculated on the dataset
+pbc_data_knn_transformed_study_patients <- predict(
+  preProcessed_knn, pbc_data_transformed_study_patients_for_knn)
+
+# missing values imputation with aregImpute() for all available patients
+#impute all available data for later use
+
+smarti <- aregImpute(~ as.factor(trt)+as.factor(ascites) + 
+                       as.factor(hepato)+as.factor(spiders)+as.factor(edema)+
+                       bili+chol+albumin+copper+alk.phos+ast+trig+platelet+
+                       protime+as.factor(stage), n.impute = 10, match = "kclosest", 
+                     data = pbc_data_transformed)
+
+imputed <- impute.transcan(smarti, imputation = 1, data = pbc_data_transformed, 
+                           list.out = TRUE, pr = FALSE, check = FALSE)
+pbc_data_transformed_imputed <- pbc_data_transformed
+pbc_data_transformed_imputed[names(imputed)]<- imputed
+
+
+
+
+# train_test split-----------------------------------------------
+# for further analyiss we will make train/test split of 70/30 on the 312 trial patients
+set.seed(12)
+index_training <- createDataPartition(pbc_data_knn_transformed_study_patients$status, 
+                                      p = 0.7, times = 1, list = FALSE)
+training_data_pbc_trial <- pbc_data_knn_transformed_study_patients[index_training,]
+testing_data_pbc_trial <- pbc_data_knn_transformed_study_patients[-index_training,]
+
+
+training_data_pbc_trial_areg <- pbc_data_transformed_study_patients_imputed_areg[index_training,]
+testing_data_pbc_trial_areg <- pbc_data_transformed_study_patients_imputed_areg[-index_training,]
+
+
+```
+
+
+### The Kaplan Meier estimator
+
+#### Statistical background
+
+Let $Y_i(t), \,i=1,\ldots,n$ be the indicator that subject $i$ is at risk and under observation at time t. Let $N_i(t)$ be the step function for the ith subject, which counts the number of events for that subject up to time t.  
+There might me events that can happen multiple times such as rehospitalization, or something that only happens once such as liver transplantation or death.
+The total number of events that have occurred up to time $t$ will be $\overline{N}(t) =\sum N_i(t)$, and the number of subjects at risk at time $t$ will be $\overline{Y}(t) = \sum Y_i(t)$. Time-dependent covariates for a subject are the vector $X_i(t)$. It will also be useful to define $d(t)$ as the number of deaths that occur exactly at time $t$.
+The most basic describtion of time-to-event data is the Kaplan-Meier estimator.
+
+$$S_{KM}(t) = \prod_{s < t} \frac{\overline{Y}(ts) - d(s)}{\overline{Y}(s)}$$
+
+The Kaplan Meier estimator can also be plotted. A drop on the curve represents an event, whereas a "+" symbols a censoring.
+For the PBC data set the Kaplan Meier estimator can be calculated fith the `survfit()` function of the survival package ^[https://cran.r-project.org/web/packages/survival/index.html].
+One further important note: the `survfit()`function expects the event to be numeric.
+
+#### Results on the PBC data
+
+
+```{r,fig.cap = "Survival curve of all available PBC patients", message = FALSE, warning = FALSE, echo = FALSE}
+
+# join survival status into 0 and 1
+
+# plot Kaplan Meier Curve for one survival function
+
+ggsurvplot(survfit(Surv(time, status)~1, 
+                   data = pbc_data_transformed))
+```
+
+
+
+When we stratify the patients according to presence or absence of ascites we get the following Kaplan Meier plot:
+
+```{r, fig.cap = "Survival curve stratified by presence or absence of ascites"}
+
+# plot the survival curve regarding stratified by treatment
+ggsurvplot(survfit(Surv(time, status)~ascites, data = pbc_data_transformed), 
+           pval = TRUE, linetype = "strata", palette = c("#E7B800", "#2E9FDF"), 
+           risk.table = TRUE)
+
+```
+
+According to this univariate analysis it seems, that the presence or absence of ascites alone has a good performance in stratifying the patients into a high and low risk group.
+But this is only a univariate analysis where many confounders could distort the true context. So actually, no statistically sound statment is possible, especially if you look at the patient numbers in the risk table under the Kaplan Meier plot.
+
+### The Cox proportional hazards model
+
+#### Statistical background
+
+Other, often used mathematical models for description and prediction in multivariate survival analyses are (1)Poisson regression, (2) Cox proportional hazards model and the Aalen additive regression model. All three are closly related:
+ 
+(1)   $$ \lambda(t|x_i) = e^{\beta_0 + \beta_1 x_1 + \beta_2 x_2 + ...}$$
+
+(2)   $$ \lambda(t|x_i) = e^{\beta_0(t) + \beta_1 x_1 + \beta_2 x_2 + ...}$$ 
+
+
+
+$$ = \lambda_0(t|x_i) e^{\beta_1 x_1 + \beta_2 x_2 + ...}$$ 
+          
+(3)   $$\lambda(t|x_i) = \beta_0(t) + \beta_1(t) x_1 + \beta_2(t) x_2 + ...$$ 
+  
+  
+  
+By far the most popular model is the Cox proportional hazards model, that can also written as:
+$$ \lambda(t|x_i) = \lambda_0(t) exp({\beta_1 x_1 + \beta_2 x_2 + ...}) = \lambda_0(t) exp(x_i \beta) $$ 
+Where $\lambda_0(t)$ is the baseline hazard function and $\beta = (\beta_1, ...\beta_K)$ is an unknown vector of regression coefficients. The baseline hazard describes how the risk of an event per time unit changes over time at the baseline levels of the covriates.
+The model states, that covariates are multiplicatly related to the the hazard. In a simple case a special treatment may halve the subject's hazard at any given time $t$, while the baseline hazard may vary.
+
+In higher dimensional data problems, where the number of variables incease and sometimes even outgo the number of observations it can be generally important to find and subset the most relevant features of the available data. 
+This step is also called feature selection. The purpose of such steps can be manifold: 
+
+1. The  interpretability of the model and therefore for example the hypothesis generation in biological/medical questions may be eased.
+2. In really high dimensional problems the model fitting and prediciton can be sppeded up. 
+3. And maybe most importantly: by reducing the noice in the data the learner's performance and be imroved.
+
+Different methods can be applied to feature selection. Some relevant are 
+
+  - filter algorithms, they select a learner independently of the learner according so certain scores
+  
+  - many machine learning methods have a built in variable importance (VIMP) measure; So selected features are important for the learner
+  
+  - wrapper methods iteralively select features by themselves to optimize the performance measure
+  
+In a medical trial as the PBC is is often interesting to also gain biological understanding from the analysis and to find the variables with the most influence on the outcome. Therefore above mentioned methods can be applied, though 17 predictor variables may not be a real highdimensional problem.
+
+
+#### Stepwise variable selection in Cox regression. 
+
+
+Many different variable selection methods can be implemente in the context of Cox regression. One method is the stepwise variable selection using the Akaike information criteria (AIC). The AIC criterion is likelihood based and closly relates to the logarithmic scoring rule. Therefore is is considered to be adequate for identifying a prediction model. But as with any autmomated model selection procedure, results can be quite unstable. We will first use a backward stepwise variable selection implemented during the function fastbw() of the rms package.
+
+```{r}
+# surv_form of all vailabe features
+
+surv_form <- Surv(time, status) ~ trt +age+sex+hepato+spiders+edema+bili+
+  chol+albumin+copper + alk.phos+ast+trig+platelet+protime+stage+ascites
+
+# stepwise variable selection based on fastbw() function of the rms package
+set.seed(12)
+fit_cox_AIC <- pec::selectCox(surv_form, data = training_data_pbc_trial, rule = "aic")
+fit_cox_AIC
+
+```
+
+In the above model the coefficients age,edema and bili were selected as significant features for outcome prediction in a multivariate setting, according to Wald test with a pvalue of <0.0001.
+
+The aregImpute() function used above, imputes the missing variables withoud centering and scaling the other continous variables, as it was done with caret::preprocess() function. In the following analysis we are going to use the aregImpute() imputed dataset.
+
+```{r}
+# in comparison lets use areg imputed NA data---------------
+
+# stepwise variable selection based on fastbw() function of the rms package
+set.seed(12)
+fit_cox_AIC_areg <- pec::selectCox(surv_form, data = training_data_pbc_trial_areg, 
+                                   rule = "aic")
+fit_cox_AIC_areg
+
+```
+
+This automated feature selection algorithm may have missed some other important variables, by not combining the differend combinations and sequences of the avialable variabels. Here $2^n -1$($n$ = number of features) of different feature combinations would be possible.The stepwise feature selection only 'selects' from last variable specified in the Surv() formula to the second to last and only keeps those, which significantly affect the AIC criterion. 
+
+#### Extension to the Cox model: Regularization
+
+An extension of the Cox model is the addition of regularization methods such as ridge- lasso- or elastic net penalization.
+This allows to create a linear regression model that is penalized for having to many (possibly unimportant) variables. 
+
+In ridge regression the variables' coefficients with minor contibution to the outcome are penalized to be close to 0, but never to be 0.The penalty term to compute this is called L2-norm, which is the sum of the squared coefficients. The amount of the penalty can be fine-tuned using the tuning parameter $\lambda$ : when $\lambda = 0$ the penalty term has no effect.
+
+Lasso stands for Least Absolute Shrinkage and Selection Operator. It shrinks the variables' coefficients towards 0, using a L1-norm penalty term. L1-norom is the sum of the absolute coefficients. This can force variables with minor model contibution to be 0. This means that lasso regularization can be seen as method of feature selection.
+
+Elastic net regression uses L1-norm and L2-norm penalization. The parameter $\alpha$  controls wheter more ridge or lasso regression should be used.
+
+    - $\alpha = 0$ -> ridge regression
+
+    - $\alpha = 1$ -> lasso regression
+
+Lets fit elastic net model on the training data. The fit_enet() function is very user friendly as it autotunes $\lambda$ and $\lambda$.
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+# matrix of features
+x <- as.matrix(training_data_pbc_trial_areg[,-c(1,2,3)])
+x <- as.matrix(training_data_pbc_trial_areg[,-c(1,2,3)])
+saveRDS(x, "x.rds")
+x <- readRDS("x.rds")
+# Surv function
+time <- training_data_pbc_trial_areg$time
+event <- training_data_pbc_trial_areg$status
+y <- Surv(time, event)
+# elastic net modelling, # 10 cross validations and set model selection criterion for autmomatic model tuning
+# for automatic model tuning one has to asses model performance in each step by a loss function. 
+# set random seed for parameter tuning. 
+fit_training_elastic_net <- fit_enet(x, y, nfolds = 10, rule = "lambda.1se", 
+                                     seed = c(5, 7))
+fit_training_elastic_net
+```
+
+We can also plot the features selected by the model as a nomogram.
+
+
+```{r fig.cap = "Nomogramm of fitted elastic net model", echo=FALSE, warning = FALSE, message=FALSE, comment=FALSE}
+# plot nomogramm of the model
+nom <- as_nomogram(
+  fit_training_elastic_net,
+  x, time, event, 
+  pred.at = 365.25 *4,#make predictionat 4 years
+  funlabel = "4-Year Overall Survival Probability"
+)
+
+plot(nom)
+```
+
+The elastic net regularized Cox model selected 7 variables for the final model: ascites, edema, bili, albumin, copper, protime and stage.
+For another statistical evaluation we will compute a unpenalized Cox model with the above selected variables.
+
+```{r}
+#fit multivariate unpenalized cox model on testing data
+coxph(Surv(time, status)~ascites+edema+bili +albumin+protime+ stage, 
+      data = training_data_pbc_trial_areg)
+```
+
+In this multivariate analysis the Wald test statistics and derived p-values, ascites excluded, seem to be significant on a significance level of 0.05.
+The variables selected by elastic net regularization seem to be significant predictors in this multivariate Cox model.
+This kind of model is a very popular method in medical sciences, because of its robustness and good clinical interpretability:
+The exponentiated coefficents 'exp(coef)' are also called *Hazard Ratios*. 
+<b/>
+<b/>
+In the case of, for example edema, the coefficent can be interpreted as follows: A patient with pronounced edema has a 2.1 times higher chance of dying then a patient without edema. 
+<b/>
+<b/>
+In the case of continous variables like bilirubin (bili) and because of the log2() transformation from before, a quadruplication of bilirubin value in the blood leads to an almost doubling of risk for death.
+
+For validation purpose we can also fit a Cox model with those variables on the testing data:
+
+```{r}
+#fit multivariate unpenalized cox model on training data
+coxph(Surv(time, status)~ascites+edema+bili +albumin+protime+ stage, 
+      data = testing_data_pbc_trial_areg)
+```
+
+In the test setting only the variables stage and bili remain significant.
+
+#### Validation of the elastic net regression model
+
+In order to validate the performane of the adaptive elastic net model one has to make predictions on new data and one needs a measure of performance. In survival analysis there are many available measures. One of the most common approaches to evaluate prediction performance, especially in random Forest modeling, is Harrel's C-Index. For a good explanation of the C-Index one can refer to the article from Schmid et al.^[https://arxiv.org/pdf/1507.03092.pdf].
+
+
+In short, a value of C near 0.5 indicates that the risk score predictions are random. Values of C close to 1 indicate, that the predicted risk scores are good at determining which patient in each of the patient pairs will have the event first.
+The censoring adjusted C-statistic by Uno et al. has the same interpretation as Harrel's C. 
+
+
+For a more continous performance parameter, that can also be depicted graphically over the time, extensions of those  'inverse-probability-of-censoring weights' based approaches like Uno's C can be made:
+
+
+At each timepoint of interest Reciver operating characteristic (ROC) curves can be plotted after calculating sensitivity and specificity based on the above mentioned statistics. The area under those ROC curves (AUC) can be calculated for different time points. An AUC close to 1 means that the test sensitivity is very high, while the 1-specificity (false positive rate) is very low. One can calculate those AUCs over multiple time points and get time dependent AUC values, for each time of interest.Those can also be plotted:
+
+```{r fig.cap="Uno's time dependent AUC in training data", echo = FALSE, message=FALSE, warning=FALSE}
+# first internal validation by time dependent AUC with "Uno estimator" 
+# internal validation has no real evidence
+# doing it for first reference basis
+
+# c Uno's AUC values for seq(1, 5, 0.5) * 365
+# use training data 10 fild bootstrapping
+
+val_intern <- validate(x, time, event,
+  model.type = "enet",
+  alpha = fit_training_elastic_net$alpha,
+  lambda = fit_training_elastic_net$lambda,
+  method = "bootstrap", boot.times = 10,
+  tauc.type = "UNO", tauc.time = seq(1, 5, 0.5) * 365,
+  seed = 42, trace = FALSE)
+# plot the Uno#s AUC
+plot(val_intern)+geom_line(col = "darkred") + xlab(" time in days")
+```
+
+The red solid line represents the mean of the AUC, the dashed blue line represents the median of the AUC. The darker intervals in the plot show the 25th and 75th quantile of the AUC. The light intervlas show the minimum and maximum AUC values.
+The bootstrap based approach seems stable, as the median and mean AUC are close over all time points. 
+For a more meaningful performance evaluation we will calculate Uno's time dependent AUCs for the test data.
+
+```{r  fig.cap="Uno's time dependent AUC in training data", echo = FALSE, message = FALSE, warning = FALSE}
+# external validation
+# more meaningful for performance evaluation
+x_test <- as.matrix(testing_data_pbc_trial_areg[,-c(1,2,3)])
+time_test <- testing_data_pbc_trial_areg$time
+event_test <- testing_data_pbc_trial_areg$status
+
+val_extern <- validate_external(
+  fit_training_elastic_net, x, time, event,
+  x_test, time_test, event_test,
+  tauc.type = "UNO",
+  tauc.time = seq(0.25, 5, 0.25) * 365)
+
+plot(val_extern)+geom_line(color = "darkred")+theme(axis.text.x = element_text(
+  angle = 60, size = 8))+xlab(" time in days")
+```
+
+With a  AUC of >0.9 until >450 days the model first does seem useful for risk stratification in PBC. Interesting is the loss of performance between the 500th - 1300th day of prediction. 
+
+Model calibration is a method to measure how far model predictions are from the actual survival outcomes. 
+The calibration can be assessed by plotting the predicted survival probabilities against the actual observed survival probabilities.
+
+```{r fig.cap="Internal calibration plot at 3 years", echo = FALSE, message = FALSE, warning = FALSE}
+
+# internal calibration
+# using 10 fold cross validation
+# ngroup = number of groups for calibration
+
+cal_internal <- calibrate(x, 
+                          time, 
+                          event, model.type = "enet", 
+                          alpha = fit_training_elastic_net$alpha,
+                          lambda = fit_training_elastic_net$lambda,
+                          method = "cv",
+                          nfolds = 10,
+                          pred.at = 365*3,
+                          ngroup = 3,
+                          seed = 12,
+                          trace = FALSE)
+plot(cal_internal)
+```
+
+
+```{r fig.cap = "External calibration plot at 3 years", echo = FALSE, message = FALSE, warning = FALSE}
+# compute calibration
+cal_testing <- calibrate_external(fit_training_elastic_net, x, time, event,
+  x_test, time_test, event_test, pred.at = 365*3, ngroup = 3)
+plot(cal_testing)
+```
+
+This depiction shows that the elastic net model performs almost equally well on the cross validated testing dataas on the training data.
+Only one time point after three years is depicted in the above plots. But when doing this for multiple time points the observed trend remains the same: The model seems to overestimate the risk of actual 'low risk' patients while for actual 'high-risk' patients the risk attribution seems to be better. With the variable 'ngroup' in the calibrate() function one can set the number of risk groups and the patients are grouped into those. 
+
+#### Risk stratification based on the fitted elastic net model
+
+As already mentioned at the beginning of the analysis chapter, the Kaplan Meier curve is a very popular depiction of time-to-event data. 
+
+In our first approach at plotting this curve we created a survival function stratified by one univariate variable ascites: It seemed that alone the absence or presence of ascites allowed a very good risk stratification of the patients. The p-value of the Log-Rank test was <0.0001. But as depicted before, those survival curves were only univariate, and therefore no statistically sound statement can be made from this simple model.
+Now we have built a multivariate elastic net regularized cox model, in which 10 of the possible 17 predictor variables were shrunken to 0 by lasso's L1-norm penalty. Ascites was selected in the final model, but it was selected as the last important variable and therefore its  regression coefficient was shrunken by ridge'2 L2-norm penalty towards 0 as can be seen in the above coefficient's nomogram.
+
+Lets plot a Kaplan Meier curve stratified by three risk groups of the fitted elastic net model:
+
+```{r fig.cap = "Kaplan Meier curves of the training data, stratified into three risk groups", echo = FALSE, message = FALSE, warning = FALSE}
+# draw risk stratified caplan meier curves based on elastic net model, using the traing set
+kmplot(cal_internal,
+       group.name = c("high risk", "medium risk", "low risk"),
+       time.at = 1:10 * 365)
+```
+
+
+
+```{r fig.cap = "Kaplan Meier curves of the test data, stratified into three risk groups", echo = FALSE, message = FALSE, warning = FALSE}
+# draw risk stratified caplan meier curves based on elastic net model, using the test set
+kmplot(cal_testing,
+       group.name = c("high risk", "medium risk", "low risk"),
+       time.at = 1:10 * 365)
+```
+
+The Kaplan Meier plots clearly summarise, that the elastic net penalized cox model may has potential for usage as a prognositc scoring system in the clinical setting; for example by providing an evidence based approach for treatment decisions and treatment planning: 
+With regard of resource allocation, for a patient in the high risk group, the liver transplantation could be planned earlier than for patients in the low risk group. Of course aided by further clinical and social variables. 
+
+The R package hdnom^[https://github.com/nanxstats/hdnom] provides a built in function for model comparison.
+All models that can be comared in this environment are mathematical modifications of the described ridge, lasso and elastic net penalized Cox models.
+In order to find the best performing penalized Cox model for our problem they have to be compared:
+
+**CAVE: Because of a knitting failure of missing UTF8 encodings in LaTex the following plot is only visible in the html document**
+```{r warning=FALSE, message = FALSE, echo = FALSE}
+# set.seed(12)
+# model_comparison_training <- compare_by_validate(x, time, event, model.type = c(
+#   "lasso", "enet", "aenet", "flasso", "snet", "mnet", "mcp"),
+#                                                  method = "cv", 
+#   nfolds = 10, tauc.type = "UNO", tauc.time = seq(0.25, 5, 0.25)*365, 
+#                                                   trace = FALSE)
+# plot(model_comparison_training)+theme(axis.text.x = element_text(angle = 60))
+```
+
+The adaptive elastic net may perform slightly better then the elastic net approach we fitted and evaluated above. 
+Adaptive elastic-net models penalize the squared error loss using a combination of the L2 penalty and an adaptive weighted L1.
+penalty.It can be seen as a combination of the elastic-net and the adaptive lasso^[(H.Zou et al., 2009)]. 
+
+
+
+
+### Random Survival Forests
+
+Extensions to the random forest approach to survival analysis provide an alternative way of feature selection or building risk prediction models. The random forest approach can provide several benefits, because no parametric or semi-parametric impositions on the underlying distributions have to be made. Random forests provide an automatic way of dealing with interactions and higher-order terms in variables.
+The basic idea of random forest is to ensemble classification and regression trees (CART) to bootstrap sample from the training data^[Breiman, L., 2001]. For a final prediction the predictions of the inidvidual trees are averaged. At each node of a individual tree only a random portion of the available variables is considered for splitting. In the survival implementation of random forests the most often used maximization statistic for splitting decisions is the log-rank statistic. Ensemble predictions are given by averages
+over the cumulative hazard estimates in the terminal nodes of the trees, often estimated by the Nelson-Aalen estimator^[Schmidt et al., 2016]. 
+The most common performance measure in random survival forests is the Harrell's C-index as already mentioned above^[(Harrell et al., 1982); (Ishwaran et al. 2008)].
+
+One of the most popular R implementations of random "survival" forests is provided in the  randomForestSRC package^[https://cran.r-project.org/web/packages/randomForestSRC/randomForestSRC.pdf] from Ishwaran and Kogalur.But also other R packages like party^[https://cran.r-project.org/web/packages/party/party.pdf] implement extensions of classical random forests to survival.
+In the following we will work with randomForestSRC.
+
+
+Let's use the package randomForestSRC to build a survival prediction model. The 'Error rate' provided by the model fit itslef is the out-of-bag (OOB) error rate, defined as 1- Harrels C-Index. This means, that a error rate close to 0 displays a good model fit, whereas values around 0.5 indicate a bad fit.
+
+```{r warning=FALSE, message = FALSE, echo = FALSE}
+#fit ensemble of trees with default values, exception: set samptype to sampling with replacement.
+set.seed(12)
+rsf_1 <- rfsrc(Surv(time, status)~., training_data_pbc_trial_areg[,-1],
+               importance = TRUE,bootstrap = "by.root", samptype = "swr", seed = 12)
+rsf_1
+```
+
+This random forest used all available predictor variables for training and prediction in an out-of-bag error fashion. By default the variable importance of the forest is also available.
+
+```{r fig.cap = "Variable importance of the random survival forest", echo = FALSE, message = FALSE, warning = FALSE}
+plot(gg_vimp(rsf_1))
+```
+
+
+
+Bilirubin, by far, seems to be the most important predictor variable for the random forest. Followed by edema, protime and copper. In comparison to the above fitted elastic net penalized cox model, which uses the parameters bili, copper, albumin and protime as the most important variables(see nomogram). So the most important variables for both modeling approaches are analogous.
+
+From a biological view this makes totally sense: A high bilirubin value presents a critical clinical sign, that surrogates, especially in the context of PBC, a significant, often irreversible obstruction of the bile ducts. The patients present themselves with pruritus and yellow staining of the skin and sclera. The high bilirubin values in the blood lead to many adverse events. For example damage of other organ systems and neurotoxicity. Plausibly this can lead to a higher risk of death. 
+Edema and the parameter protime (also called protrombin time) are very good clinical markers for liver function: If the PBC has already processed far, the liver production function reduces and important blood proteins and encymes (like albumin and protime) can not be produced in an adequate amount. As a consequence the oncotic pressure in the blood system reduces and the patients develop edema. 
+
+Let's make a prediction on the test set:
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# make prediction on test data
+set.seed(12)
+prediction_rsf_1 <-predict(rsf_1$forest, testing_data_pbc_trial_areg)
+prediction_rsf_1
+```
+
+Harrels C-index is 1 - Error rate which indicates a good model fit.
+
+The package randomForestSRC also provides different ways of feature selection:
+- VIMP measures 
+- minimal depth
+- variable hunting
+For further explanation refer to (randomForestSRC)[https://cran.r-project.org/web/packages/randomForestSRC/index.html] documentation.
+Lets use the default method minimal depth "md" so filter for relevant predictors.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# as default use mehtod = "md" = minimal depth; 
+set.seed(12)
+variable_selection_training <- var.select(Surv(time, status)~., 
+                                          training_data_pbc_trial_areg[,-1], refit = TRUE)
+variable_selection_training$rfsrc.refit.obj
+```
+
+Of the orginal 17 variables 11 were selected by minimal depth feature selection. 
+Let's predict on the new data with the refitted tree, that is only using the eleven selected variables.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# make prediction with minimal depth selected random forest
+set.seed(12)
+prediction_variable_selection_training <- predict(
+  variable_selection_training$rfsrc.refit.obj, testing_data_pbc_trial_areg)
+prediction_variable_selection_training
+```
+
+Compared to the full random forest, using all features for prediction, Harrels-C index =(1-'Test set error rate/100') decreases only a little. 
+
+### Benchmark of different survival learners
+
+To further compare different survival learners we will conduct a simple benchmark.
+The  package mlr3 nad its extensions provide a machine learning environment, that includes survival learner comparison, tuning and benchmarking.
+Within this environment we will compare the performance of different learners on the orginal set of 17 features. 
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, comment=FALSE}
+# create task from training data
+
+# change class of imputed columns from S3imputed to numeric
+
+training_data_pbc_trial_areg <- 
+  training_data_pbc_trial_areg %>% 
+  mutate(chol = as.numeric(chol), copper = as.numeric(copper), 
+         trig = as.numeric(trig), platelet = as.numeric(platelet))
+
+# create task
+pbc_task <- TaskSurv$new(id = "pbc_task", backend = training_data_pbc_trial_areg, time = "time", event = "status")
+# define learners
+pbc_learner <- lapply(c("surv.coxph",  "surv.rfsrc", "surv.xgboost", 
+                        "surv.rpart", "surv.ranger","surv.glmnet", 
+                        "surv.cvglmnet"), mlr3::lrn)
+
+# define resampling 10fold cv
+pbc_resampling <- mlr3::rsmp(.key = "cv")
+# lets compute a first benchmark
+pbc_design <- mlr3::benchmark_grid(tasks = pbc_task, 
+                                   learners = pbc_learner, 
+                                   resamplings = pbc_resampling)
+# define performance measures
+pbc_measures <- lapply(c("surv.unoAUC", "surv.unoC",  "surv.harrellC"), msr)
+set.seed(24)
+pbc_bmr <- benchmark(pbc_design)
+#Harrels C-Index is the default measure, aggregate the results over the 10 cv
+pbc_bmr$aggregate(measures = pbc_measures)
+```
+
+Cave: In the surv.rfsrc model the C-index is automatically reported as 1-(C-index). Surprisingly the simple Cox model seems to perform as the second best compared to the other leaners. 
+
+Only the surv.glmnet leaner outperforms the simple coxph model.The surv.glmnet a learner from the glmnet package, is actually just a Cox model with elastic net regularization like the one we trained and predicted with above. 
+
+Of course the other learners 	are just preliminary assessed with the little benchmark above. For a further, more accurate analysis one could tune every learner and redo the benchmark. Regardless, the elastic net regularized Cox regression, but although the Cox model without regularization seems to perform well, with the default tuning parameters clearly better than the other, more complex models.  
+
+
+
+# Summary and Conclusion
+
+In the conducted analysis we tried to identify prognostic biomarkers which could help in risk stratification of PBC-patients. Therefore we applied different machine learning algorithms such as random forests or generalized linear models like Cox regression. The best results in risk prediction could be achieved by an elastic net penalized Cox regression model. 
+
+Interesingly the penalized Cox model outperformed the random survival forest by far. This could be due to the low dimensionality of the data, consisting of only seventeen possible predictor variables. This is not a setting for which random forests were built, since random forests were developed for multi-dimensional datasets, where the number of features can easily exceed the number of observations. 
+
+However, both approaches(random forests and Cox modelling) helped in identifying prognostically relevant blood biomarkers. In both settings the variables bilirubin, edema, prothrombin and urinary copper levels seemed to have the greatest impact on prediction performance. Those four markers seem biologically feasible in terms of disease pathophysiology. 
+
+Other markers as hepatic transferases, triglycerides and histological state, for which a patient even has to undergo biopsy, did not seem to have any prognostic impact. 
+
+This whole analysis is by far only exploratory: The analyzed data was collected from 1974 to 1984 and only containes 312 tidy annotated patients. Further we had to imput missing values.
+
+In order to not further downsize the dataset we labeled patients with a liver transplantation as survivors.
+Technically this leads to bias and confounding when building models. But in order to analyze this dataset without this simplification one would have to handle it as a competing-risk time_to_event analysis. But only 19 of the 312 randmized patients were liver transplanted, a far too low number in regard to confounders.
+The fitted models are only some of the available models that can be used to analyze time to event data. Different methods, for example gradient boosting or other random survival forest approaches could result in better model fits in this setting. 
+
+The whole analysis is descriptive and retrospective, so prone to bias and confounding. To further validate risk scoring models in this setting one could assemble other retrospective datasets to gain a bigger analysis pool.
+If the variables selected as significant in the present analysis could be confirmed in this setting, one could think of conducting a prospective clinical trial, in which patients get stratified into risk groups at the day of enrollment. This is probably the only way of excluding many confounding variables one can not grasp in a retrospective setting.
+
+
